@@ -1,0 +1,28 @@
+# R / RStudio local state
+.Rhistory
+.RData
+.Ruserdata
+.Rproj.user/
+
+# Local environment / secrets
+.Renviron
+.env
+.env.*
+
+# Local GEO inputs (public source data; keep Data/README.md tracked)
+Data/GSE*.gz
+Data/GSE*_series_matrix.txt.gz
+Data/GPL*.txt
+Data/PPI_centrality_export.tsv
+
+# Analysis caches and downloads
+Cache/*
+!Cache/README.md
+
+# Results_manuscript/ is intentionally not ignored so validated manuscript tables/figures can be committed selectively.
+
+# OS/editor files
+.DS_Store
+Thumbs.db
+*.swp
+*~
