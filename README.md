@@ -4,9 +4,6 @@ This repository contains the R analysis pipeline for:
 
 **Reproducible Downregulation and Network Convergence of AQP8, GUCA2A, and MS4A12 in Colorectal Cancer: A Paired-Cohort Transcriptomic Meta-analysis**
 
-**Authors:** Seyed Ahmadreza Siadat, Eghbal Mansoori, Navid Mogharrab, Mostafa Saadat  
-**Maintainer:** Seyed Ahmadreza Siadat
-
 The pipeline analyzes nine paired colorectal cancer GEO cohorts, performs gene-wise random-effects meta-analysis, enrichment and network analyses, and evaluates AQP8, GUCA2A, and MS4A12 in TCGA-COAD/READ.
 
 ## Repository contents
