@@ -26,7 +26,8 @@ crc-paired-transcriptomic-meta-analysis/
 ├── Results_manuscript/
 │   └── README.md
 └── environment/
-    └── README.md
+    ├── README.md
+    └── sessionInfo_tested.txt
 ```
 
 Large input files and complete generated results are distributed separately as GitHub Release assets rather than stored in Git history.
@@ -58,7 +59,9 @@ TCGA-COAD/READ, STRING, and other online resources are retrieved by the pipeline
 
 ## Requirements
 
-The study analysis was run with **R 4.4.1**. The script checks for required packages at startup and does not install or update packages automatically.
+The study analysis was run with **R 4.4.1**. The exact R session information from the validated final run is provided in [`environment/sessionInfo_tested.txt`](environment/sessionInfo_tested.txt).
+
+The script checks for required packages at startup and does not install or update packages automatically.
 
 Main CRAN packages include `dplyr`, `tidyr`, `purrr`, `readr`, `tibble`, `stringr`, `data.table`, `ggplot2`, `ggrepel`, `patchwork`, `scales`, `metafor`, `WGCNA`, `pheatmap`, `igraph`, `ggraph`, `png`, `survival`, `survminer`, `msigdbr`, `matrixStats`, `httr2`, and `jsonlite`.
 
@@ -83,8 +86,12 @@ For the survival analysis, case-level `sex_at_birth` is retrieved from the GDC C
 
 ## Outputs
 
-A complete run produces manuscript and supplementary figures, machine-readable tables, QC files, and `sessionInfo.txt` under `Results_manuscript/`. The complete output archive from the manuscript run is available from the repository's **GitHub Releases** page.
+A complete run produces manuscript and supplementary figures, machine-readable tables, QC files, and `sessionInfo.txt` under `Results_manuscript/`.
+
+The complete output archive from the validated manuscript run is available from the repository's **GitHub Releases** page. The tested R session information retained in `environment/sessionInfo_tested.txt` corresponds to that validated final run.
 
 ## Citation and license
 
-Repository citation metadata are provided in `CITATION.cff`. The code and repository documentation are released under the [MIT License](LICENSE). Third-party datasets and resources remain subject to their own terms of use.
+Repository citation metadata are provided in `CITATION.cff`.
+
+The code and repository documentation are released under the [MIT License](LICENSE). Third-party datasets and resources remain subject to their own terms of use.
