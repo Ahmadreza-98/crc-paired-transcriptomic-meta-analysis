@@ -1,0 +1,19 @@
+cff-version: 1.2.0
+message: "If you use this repository, please cite the software repository. The manuscript citation will be added after publication."
+title: "CRC paired-cohort transcriptomic meta-analysis"
+type: software
+authors:
+  - family-names: "Siadat"
+    given-names: "Seyed Ahmadreza"
+    orcid: "https://orcid.org/0009-0004-1439-6306"
+version: "1.0.0"
+license: "MIT"
+keywords:
+  - colorectal cancer
+  - transcriptomic meta-analysis
+  - WGCNA
+  - TCGA
+  - GEO
+  - AQP8
+  - GUCA2A
+  - MS4A12
