@@ -293,6 +293,9 @@ FOCAL_GENES <- c("AQP8", "GUCA2A", "MS4A12")
 
 STRING_VERSION <- "12.0"
 STRING_SCORE_THRESHOLD <- 400
+MCODE_NODE_SCORE_CUTOFF <- 0.2
+MCODE_HAIRCUT <- TRUE
+MCODE_FLUFF <- FALSE
 
 PLOT_COLORS <- c(
   down = "#2C7BB6",
@@ -2670,22 +2673,108 @@ ppi <- retry_remote_call(
   )
 )
 
-mcode_modules <- list(
-  `1` = c(
-    "PRC1","CENPA","MCM4","MELK","CDKN3","CCNB1","CDK1","CKS2","GINS2","KIF20A",
-    "PBK","PTTG1","NCAPG","KIF4A","ATAD2","DLGAP5","CCNA2","UHRF1","RAD51AP1","NUSAP1",
-    "CEP55","AURKA","TTK","TPX2","CENPN","TRIP13","ANLN","CDC20","BUB1","CENPW",
-    "TOP2A","MAD2L1","ASPM","CDCA7","HJURP","HMMR","FANCI","CDCA5","CENPF","UBE2T","MCM2"
-  ),
-  `2` = c("CXCL8","SPP1","MMP1","PLAU","COL1A1","CXCL12","MMP3","MMP7","CXCL1","MMP12"),
-  `3` = c("MT1H","MT1E","MT1M","MT1G","MT1X","MT2A","MT1F"),
-  `4` = c("AQP8","GCG","SLC26A3","GUCA2A","CLCA1","SOX9","CLCA4","MS4A12","GUCA2B"),
-  `5` = c("AKR1B10","BCHE","NPY","ADH1B","ADH1A","PYY","VIP","ADH1C","SI","MAOA",
-          "GPT","SCG2","GPX3","FABP1","XDH","SST","CHGA","VIPR1")
+if (is.null(ppi) || igraph::vcount(ppi$graph) < 3L) {
+  stop("The STRING PPI graph is too small for MCODE clustering.")
+}
+
+run_mcode <- function(graph, vwp = 0.2, haircut = TRUE, fluff = FALSE) {
+  if (!inherits(graph, "igraph") || igraph::is_directed(graph)) {
+    stop("MCODE requires an undirected igraph network.")
+  }
+  if (!is.finite(vwp) || vwp < 0 || vwp > 1) {
+    stop("MCODE node score cutoff must be between 0 and 1.")
+  }
+  if (fluff) {
+    stop("MCODE fluff expansion is not enabled in this analysis.")
+  }
+
+  graph <- igraph::simplify(graph, remove.multiple = TRUE, remove.loops = TRUE)
+  n <- igraph::vcount(graph)
+  neighbors <- lapply(seq_len(n), function(i) {
+    as.integer(igraph::neighbors(graph, i, mode = "all"))
+  })
+
+  node_scores <- vapply(seq_len(n), function(i) {
+    local <- igraph::induced_subgraph(graph, unique(c(i, neighbors[[i]])))
+    if (igraph::vcount(local) < 2L) return(0)
+    cores <- igraph::coreness(local, mode = "all")
+    max_core <- max(cores)
+    if (max_core == 0L) return(0)
+    core_graph <- igraph::induced_subgraph(local, which(cores == max_core))
+    if (igraph::vcount(core_graph) < 2L) return(0)
+    max_core * igraph::edge_density(core_graph, loops = FALSE)
+  }, numeric(1))
+
+  labels <- igraph::V(graph)$name
+  if (is.null(labels)) labels <- as.character(seq_len(n))
+  seeds <- order(-node_scores, labels)
+  assigned <- rep(FALSE, n)
+  modules <- list()
+  scores <- numeric(0)
+
+  for (seed in seeds) {
+    if (assigned[seed] || node_scores[seed] <= 0) next
+    cutoff <- node_scores[seed] * (1 - vwp)
+    included <- rep(FALSE, n)
+    included[seed] <- TRUE
+    queue <- seed
+    pos <- 1L
+
+    while (pos <= length(queue)) {
+      current <- queue[pos]
+      pos <- pos + 1L
+      candidates <- neighbors[[current]]
+      candidates <- candidates[
+        !included[candidates] & !assigned[candidates] &
+          node_scores[candidates] >= cutoff
+      ]
+      if (length(candidates) > 0L) {
+        included[candidates] <- TRUE
+        queue <- c(queue, candidates)
+      }
+    }
+
+    members <- which(included)
+    if (length(members) < 3L) next
+    subgraph <- igraph::induced_subgraph(graph, members)
+    if (haircut) {
+      members <- members[igraph::coreness(subgraph, mode = "all") >= 2L]
+    }
+    if (length(members) < 3L) next
+
+    subgraph <- igraph::induced_subgraph(graph, members)
+    modules[[length(modules) + 1L]] <- members
+    scores <- c(scores, length(members) * igraph::edge_density(subgraph, loops = FALSE))
+    assigned[members] <- TRUE
+  }
+
+  if (!length(modules)) return(list(COMPLEX = list(), score = numeric(0)))
+  rank <- order(-scores, vapply(modules, function(x) min(labels[x]), character(1)))
+  list(COMPLEX = modules[rank], score = scores[rank])
+}
+
+mcode_result <- run_mcode(
+  ppi$graph,
+  vwp = MCODE_NODE_SCORE_CUTOFF,
+  haircut = MCODE_HAIRCUT,
+  fluff = MCODE_FLUFF
 )
 
-mcode_table <- bind_rows(lapply(names(mcode_modules), function(m) {
-  tibble(module = m, symbol = mcode_modules[[m]])
+if (length(mcode_result$COMPLEX) == 0L) {
+  stop("MCODE did not identify any clusters in the STRING PPI graph.")
+}
+
+mcode_modules <- lapply(mcode_result$COMPLEX, function(vertex_ids) {
+  sort(unique(igraph::V(ppi$graph)$name[as.integer(vertex_ids)]))
+})
+names(mcode_modules) <- as.character(seq_along(mcode_modules))
+
+mcode_table <- dplyr::bind_rows(lapply(seq_along(mcode_modules), function(i) {
+  tibble(
+    module = as.character(i),
+    symbol = mcode_modules[[i]],
+    score = as.numeric(mcode_result$score[i])
+  )
 }))
 write_tsv_safe(mcode_table, "PPI_MCODE_modules.tsv")
 
@@ -5530,7 +5619,13 @@ blue_hub_symbols <- unique(
   )
 )
 
-mcode4 <- mcode_modules[["4"]]
+mcode_genes <- unique(unlist(mcode_modules, use.names = FALSE))
+mcode_focal_modules <- mcode_modules[
+  vapply(mcode_modules, function(genes) {
+    any(genes %in% FOCAL_GENES)
+  }, logical(1))
+]
+mcode_focal_genes <- unique(unlist(mcode_focal_modules, use.names = FALSE))
 
 tcga_top25_down_symbols <- unique(
   na.omit(
@@ -5545,7 +5640,7 @@ candidate_pool <- unique(
       down_symbols,
       blue_hub_symbols
     ),
-    mcode4
+    mcode_focal_genes
   )
 )
 
@@ -5605,9 +5700,9 @@ candidate_summary <- tibble(
       symbol %in%
       blue_hub_symbols,
     
-    MCODE_module4 =
+    MCODE_cluster_member =
       symbol %in%
-      mcode4,
+      mcode_genes,
     
     TCGA_COAD_READ_top25_down =
       symbol %in%
@@ -5697,7 +5792,7 @@ candidate_summary <- candidate_summary |>
       normal_module_hub
     ),
     desc(
-      MCODE_module4
+      MCODE_cluster_member
     ),
     FDR
   )
@@ -5710,7 +5805,7 @@ write_tsv_safe(
 evidence_columns <- c(
   "meta_downregulated",
   "normal_module_hub",
-  "MCODE_module4",
+  "MCODE_cluster_member",
   "final_centrality_above_median",
   "TCGA_COAD_READ_top25_down"
 )
@@ -5759,7 +5854,7 @@ integrative_plot_df <- candidate_summary |>
       labels = c(
         "Meta-analysis downregulated",
         "Normal-associated WGCNA hub",
-        "MCODE module 4",
+        "MCODE cluster member",
         "Final Centrality above median",
         "TCGA top-25 downregulated"
       )
@@ -6511,6 +6606,27 @@ all_module_genes <- intersect(
   igraph::V(g)$name
 )
 
+effect_values <- unname(
+  effect_map[
+    all_module_genes
+  ]
+)
+
+effect_values <- effect_values[
+  is.finite(effect_values)
+]
+
+effect_legend_max <- if (length(effect_values) > 0L) {
+  max(1, ceiling(max(abs(effect_values))))
+} else {
+  1
+}
+
+effect_legend_limits <- c(
+  -effect_legend_max,
+  effect_legend_max
+)
+
 centrality_values <- unname(
   score_map[
     all_module_genes
@@ -6642,7 +6758,8 @@ make_mcode_panel <- function(
       low = "#2166AC",
       mid = "white",
       high = "#B2182B",
-      midpoint = 0
+      midpoint = 0,
+      limits = effect_legend_limits
     ) +
     
     ggplot2::scale_size_continuous(
@@ -6699,23 +6816,7 @@ make_mcode_panel <- function(
 }
 
 
-module_ids <- names(
-  mcode_modules
-)
-
-module_ids <- module_ids[
-  module_ids %in%
-    as.character(
-      seq_len(
-        min(
-          5,
-          length(
-            module_ids
-          )
-        )
-      )
-    )
-]
+module_ids <- head(names(mcode_modules), 5L)
 
 panel_tags <- LETTERS[
   seq_along(
@@ -6746,26 +6847,21 @@ module_plots_pub <- module_plots_pub[
   )
 ]
 
-if (length(module_plots_pub) < 5) {
-  stop(
-    "Five MCODE module panels are required for Figure 4."
-  )
+if (length(module_plots_pub) == 0L) {
+  stop("No MCODE modules with at least two PPI genes were available for Figure 4.")
 }
 
-
-# A compact custom legend is shown only once, below module 5.
-# Node colors are scaled within each module, so the color key is intentionally
-# qualitative and shows the full blue-white-red direction of Meta log2FC.
+# One compact legend uses the same log2FC scale as all network panels.
 
 legend_gradient <- data.frame(
   x = seq(
-    0.65,
-    4.35,
+    1.10,
+    3.90,
     length.out = 121
   ),
   value = seq(
-    -1,
-    1,
+    effect_legend_limits[1],
+    effect_legend_limits[2],
     length.out = 121
   )
 )
@@ -6780,8 +6876,8 @@ figure4_legend <-
       y = 1.05,
       fill = value
     ),
-    width = 0.035,
-    height = 0.34
+    width = 0.028,
+    height = 0.30
   ) +
   
   ggplot2::scale_fill_gradient2(
@@ -6789,10 +6885,7 @@ figure4_legend <-
     mid = "white",
     high = "#B2182B",
     midpoint = 0,
-    limits = c(
-      -1,
-      1
-    ),
+    limits = effect_legend_limits,
     guide = "none"
   ) +
   
@@ -6808,18 +6901,33 @@ figure4_legend <-
   ggplot2::annotate(
     "text",
     x = c(
-      0.65,
+      1.10,
       2.50,
-      4.35
+      3.90
     ),
-    y = 0.53,
+    y = 0.67,
+    label = c(
+      as.character(effect_legend_limits[1]),
+      "0",
+      paste0("+", effect_legend_limits[2])
+    ),
+    size = 2.60,
+    color = "grey20"
+  ) +
+
+  ggplot2::annotate(
+    "text",
+    x = c(
+      1.10,
+      3.90
+    ),
+    y = 0.30,
     label = c(
       "Downregulated",
-      "0",
       "Upregulated"
     ),
-    size = 2.55,
-    color = "grey25"
+    size = 2.35,
+    color = "grey35"
   ) +
   
   ggplot2::annotate(
@@ -6905,66 +7013,10 @@ figure4_legend <-
 # Figure assembly
 ###############################################################################
 
-row_1 <-
-  module_plots_pub[["1"]] +
-  module_plots_pub[["2"]] +
-  patchwork::plot_layout(
-    widths = c(
-      1,
-      1
-    )
-  )
-
-
-row_2 <-
-  module_plots_pub[["3"]] +
-  module_plots_pub[["4"]] +
-  patchwork::plot_layout(
-    widths = c(
-      1,
-      1
-    )
-  )
-
-
-# The fifth module is centered deliberately so the final row does not look
-# unfinished or visually heavier on the left.
-module_5_with_legend <-
-  module_plots_pub[["5"]] /
-  figure4_legend +
-  patchwork::plot_layout(
-    heights = c(
-      1,
-      0.24
-    )
-  )
-
-
-row_3 <-
-  patchwork::plot_spacer() +
-  module_5_with_legend +
-  patchwork::plot_spacer() +
-  patchwork::plot_layout(
-    widths = c(
-      0.50,
-      1,
-      0.50
-    )
-  )
-
-
-figure4_pub <-
-  row_1 /
-  row_2 /
-  row_3 +
-  patchwork::plot_layout(
-    heights = c(
-      1,
-      1,
-      1.24
-    )
-  )
-
+figure4_pub <- patchwork::wrap_plots(
+  c(unname(module_plots_pub), list(figure4_legend)),
+  ncol = 2
+)
 
 
 # Figure 5 palette
